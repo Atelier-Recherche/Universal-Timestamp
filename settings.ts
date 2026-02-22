@@ -90,6 +90,28 @@ export class RecordingIndicatorSettingTab extends PluginSettingTab {
 				})
 			);
 
+		containerEl.createEl('h3', { text: 'Lecture' });
+
+		new Setting(containerEl)
+			.setName('Timecode : lecture dans la note')
+			.setDesc('Au clic sur un timecode, déplacer la lecture dans le lecteur audio déjà présent dans la note au lieu d\'ouvrir un panneau.')
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.seekTimecodeInPagePlayer).onChange(async (value) => {
+					this.plugin.settings.seekTimecodeInPagePlayer = value;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName('Debug clic timecode (console)')
+			.setDesc('Affiche dans la console (Ctrl+Shift+I) les étapes au clic sur un timecode pour diagnostiquer les problèmes.')
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.debugTimecodeClick).onChange(async (value) => {
+					this.plugin.settings.debugTimecodeClick = value;
+					await this.plugin.saveSettings();
+				})
+			);
+
 		containerEl.createEl('h3', { text: 'Conseils' });
 
 		const tips = containerEl.createEl('div');

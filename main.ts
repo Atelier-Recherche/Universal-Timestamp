@@ -9,6 +9,10 @@ interface RecordingIndicatorSettings {
 	timecodeFormat: string;
 	timeOffsetSeconds: number;
 	timecodeAdjustmentSeconds: number;
+	/** Au clic sur un timecode, déplacer la lecture dans le lecteur de la note au lieu d'ouvrir un panneau. */
+	seekTimecodeInPagePlayer: boolean;
+	/** Afficher dans la console les étapes du clic timecode (pour diagnostic). */
+	debugTimecodeClick: boolean;
 }
 
 interface PlaceholderMatch {
@@ -24,7 +28,9 @@ const DEFAULT_SETTINGS: RecordingIndicatorSettings = {
 	showSeconds: true,
 	timecodeFormat: '[{time}]',
 	timeOffsetSeconds: 0,
-	timecodeAdjustmentSeconds: 10
+	timecodeAdjustmentSeconds: 10,
+	seekTimecodeInPagePlayer: true,
+	debugTimecodeClick: false
 };
 
 const TIMECODE_PLACEHOLDER_REGEX = /%%REC\{"time":"([^"]+)"\}%%(\[[^\]]+\]|\([^)]+\)|[^\s]+)/g;
@@ -559,6 +565,11 @@ export default class RecordingIndicatorPlugin extends Plugin {
 			})
 		);
 
+		// Capture sur document pour intercepter le clic avant la navigation Obsidian
+		this.registerDomEvent(document, 'click', (e: MouseEvent) => {
+			this.handleTimecodeLinkClick(e);
+		}, true);
+
 		this.registerEvent(
 			this.app.vault.on('create', (file) => {
 				if (!(file instanceof TFile) || !this.isAudioFile(file)) {
@@ -1011,6 +1022,212 @@ export default class RecordingIndicatorPlugin extends Plugin {
 
 	private sanitiseLinkPath(input: string): string {
 		return input.split('#')[0]?.trim() ?? '';
+	}
+
+	/**
+	 * Retourne la MarkdownView dont le conteneur contient l'élément (pour savoir dans quelle note le lien a été cliqué).
+	 */
+	private getMarkdownViewContaining(el: HTMLElement): MarkdownView | null {
+		let found: MarkdownView | null = null;
+		this.app.workspace.iterateAllLeaves((leaf) => {
+			const view = leaf.view;
+			if (view instanceof MarkdownView && view.contentEl?.contains(el)) {
+				found = view;
+				return false; // arrêter l’itération
+			}
+			return true;
+		});
+		return found;
+	}
+
+	/**
+	 * Extrait le chemin vault (pour getFirstLinkpathDest) depuis un href Obsidian (ex. app://local/dossier/fichier.m4a).
+	 */
+	private linkPathFromHref(href: string): string {
+		let path = href.trim().replace(/\\/g, '/');
+		// Obsidian rend souvent les liens en app://local/chemin/relatif/au/vault
+		if (path.startsWith('app://local/')) {
+			path = path.slice('app://local/'.length);
+		} else if (path.startsWith('app://')) {
+			const after = path.slice(6);
+			const slash = after.indexOf('/');
+			path = slash >= 0 ? after.slice(slash + 1) : after;
+		}
+		// Parfois le chemin commence par le nom du vault ; les chemins internes sont relatifs à la racine
+		const vaultName = this.app.vault.getName();
+		if (vaultName && path.startsWith(vaultName + '/')) {
+			path = path.slice(vaultName.length + 1);
+		}
+		return path;
+	}
+
+	/**
+	 * Au clic sur un lien timecode (#t=…), si l'option est activée et que la note contient
+	 * le lecteur pour ce fichier audio, on positionne la lecture dans ce lecteur au lieu d'ouvrir un panneau.
+	 */
+	private handleTimecodeLinkClick(e: MouseEvent): void {
+		const dbg = this.settings.debugTimecodeClick;
+		if (!this.settings.seekTimecodeInPagePlayer || e.button !== 0) {
+			return;
+		}
+
+		const target = e.target as HTMLElement;
+		const inEditor = target?.closest?.('.cm-editor');
+		const inPreview = target?.closest?.('.markdown-preview-view');
+		if (dbg && (inEditor || inPreview)) {
+			console.log('[Universal Timestamp] Clic dans la note', {
+				tag: target?.tagName,
+				class: target?.className?.slice?.(0, 80),
+				inEditor: !!inEditor,
+				inPreview: !!inPreview
+			});
+		}
+
+		// 1) Lien rendu (preview) : <a> ou élément avec data-href
+		let link: HTMLElement | null = target?.closest?.('a[href*="#t="], a[data-href*="#t="]');
+		if (!link) {
+			link = target?.closest?.('[data-href*="#t="]');
+		}
+		if (link && (link instanceof HTMLAnchorElement || link.getAttribute('data-href'))) {
+			this.handleTimecodeHref(link.getAttribute('data-href') ?? (link as HTMLAnchorElement).getAttribute?.('href') ?? '', link, dbg, e);
+			return;
+		}
+
+		// 2) Clic dans l’éditeur (Live Preview / source) : récupérer le lien à la position du clic
+		if (inEditor) {
+			const fromEditor = this.handleTimecodeClickInEditor(e, dbg);
+			if (fromEditor) {
+				e.preventDefault();
+				e.stopPropagation();
+				e.stopImmediatePropagation();
+			}
+			return;
+		}
+
+		if (dbg && inPreview) {
+			console.log('[Universal Timestamp] Preview : pas de lien #t= trouvé sur', target?.tagName);
+		}
+	}
+
+	private handleTimecodeHref(href: string, link: HTMLElement, dbg: boolean, e: MouseEvent): void {
+		if (!href.includes('#t=')) {
+			if (dbg) console.log('[Universal Timestamp] Lien sans #t=', href);
+			return;
+		}
+
+		const sharpIndex = href.indexOf('#');
+		const pathRaw = sharpIndex >= 0 ? href.slice(0, sharpIndex).trim() : '';
+		const hash = sharpIndex >= 0 ? href.slice(sharpIndex + 1).trim() : '';
+		const tMatch = hash.match(/^t=(\d+)$/);
+		if (!pathRaw || !tMatch) {
+			if (dbg) console.log('[Universal Timestamp] Hash invalide', pathRaw, hash);
+			return;
+		}
+
+		const path = this.linkPathFromHref(pathRaw);
+		if (!path) {
+			if (dbg) console.log('[Universal Timestamp] Chemin vide après parse', pathRaw);
+			return;
+		}
+
+		const offsetSeconds = parseInt(tMatch[1], 10);
+		if (!Number.isFinite(offsetSeconds) || offsetSeconds < 0) {
+			return;
+		}
+
+		if (dbg) console.log('[Universal Timestamp] Lien timecode détecté', { path, pathRaw, offsetSeconds, href });
+
+		const view = this.getMarkdownViewContaining(link) ?? this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (this.trySeekToTimecode(view, path, offsetSeconds, dbg)) {
+			e.preventDefault();
+			e.stopPropagation();
+			e.stopImmediatePropagation();
+		}
+	}
+
+	/**
+	 * Positionne la lecture du lecteur de la note à offsetSeconds. Retourne true si le seek a été fait.
+	 */
+	private trySeekToTimecode(view: MarkdownView | null, path: string, offsetSeconds: number, dbg: boolean): boolean {
+		if (!view?.file) {
+			if (dbg) console.log('[Universal Timestamp] Pas de vue Markdown ou fichier');
+			return false;
+		}
+		const resolved = this.resolveFileFromLink(path, view.file);
+		if (!resolved || !this.isAudioFile(resolved)) {
+			if (dbg) console.log('[Universal Timestamp] Fichier non résolu ou pas audio', path, resolved?.path);
+			return false;
+		}
+		const linkedAudio = this.getLinkedAudioFile(view.file);
+		if (linkedAudio?.path !== resolved.path) {
+			if (dbg) console.log('[Universal Timestamp] Audio lié à la note différent du lien', linkedAudio?.path, resolved.path);
+			return false;
+		}
+		let player = this.findPlayerForFile(resolved);
+		if (!player && view.contentEl) {
+			player = this.findPlayerInContainer(view.contentEl, resolved);
+		}
+		if (!player) {
+			if (dbg) console.log('[Universal Timestamp] Aucun lecteur trouvé pour', resolved.path);
+			return false;
+		}
+		player.currentTime = offsetSeconds;
+		player.play().catch(() => {});
+		if (dbg) console.log('[Universal Timestamp] Lecture positionnée à', offsetSeconds, 's');
+		return true;
+	}
+
+	/**
+	 * Clic dans l’éditeur (Live Preview ou source) : trouve le lien [[...#t=...]] à la position du clic et lance le seek.
+	 */
+	private handleTimecodeClickInEditor(e: MouseEvent, dbg: boolean): boolean {
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!view?.file?.extension?.toLowerCase?.()?.endsWith?.('md') || !view.editor) {
+			return false;
+		}
+		const editor = view.editor as {
+			cm?: { posAtCoords?: (p: { x: number; y: number }) => { pos: number } | null };
+			posAtMouse?: (ev: MouseEvent) => { line: number; ch: number } | null;
+			getValue?: () => string;
+		};
+		let offset: number | null = null;
+		const posAtMouse = editor.posAtMouse?.(e);
+		if (posAtMouse != null && typeof posAtMouse.line === 'number') {
+			const content = view.editor.getValue();
+			const lines = content.split('\n');
+			for (let i = 0; i < posAtMouse.line && i < lines.length; i++) {
+				offset = (offset ?? 0) + lines[i].length + 1;
+			}
+			offset = (offset ?? 0) + posAtMouse.ch;
+		}
+		if (offset == null && editor.cm?.posAtCoords) {
+			const posResult = editor.cm.posAtCoords({ x: e.clientX, y: e.clientY });
+			if (posResult?.pos != null) offset = posResult.pos;
+		}
+		if (offset == null || offset < 0) {
+			if (dbg) console.log('[Universal Timestamp] Éditeur : position non trouvée au clic');
+			return false;
+		}
+		const content = view.editor.getValue();
+		// Trouver tous les liens wiki [[path#t=123|label]] ou [[path#t=123]]
+		// Lien wiki [[path#t=123|label]] ou [[path#t=123]] — [^\]#] = pas ] ni # ; label optionnel sans ]
+		const wikiLinkRegex = /\[\[([^\]#]+)#t=(\d+)(?:\|[^\x5D]*)?\]\]/g;
+		let match: RegExpExecArray | null;
+		while ((match = wikiLinkRegex.exec(content)) !== null) {
+			const start = match.index;
+			const end = start + match[0].length;
+			if (offset >= start && offset <= end) {
+				const fullMatch = match[1].trim(); // "path/to/file.opus#t=123"
+				const sharpIdx = fullMatch.indexOf('#');
+				const path = sharpIdx >= 0 ? fullMatch.slice(0, sharpIdx).trim() : fullMatch;
+				const offsetSeconds = parseInt(match[2], 10);
+				if (!path || !Number.isFinite(offsetSeconds) || offsetSeconds < 0) continue;
+				if (dbg) console.log('[Universal Timestamp] Éditeur : lien timecode à la position', { path, offsetSeconds });
+				return this.trySeekToTimecode(view, path, offsetSeconds, dbg);
+			}
+		}
+		if (dbg) console.log('[Universal Timestamp] Éditeur : pas de lien #t= à la position', offset);
+		return false;
 	}
 
 	private sanitiseMarkdownLinkTarget(input: string): string {
@@ -1543,6 +1760,44 @@ export default class RecordingIndicatorPlugin extends Plugin {
 			}
 		}
 
+		return null;
+	}
+
+	/**
+	 * Cherche un lecteur audio/vidéo dans un conteneur (ex. contenu d'une vue), pour un fichier donné.
+	 * Utile quand le lecteur a une URL non reconnue (ex. Media Extended avec app://).
+	 */
+	private findPlayerInContainer(container: HTMLElement, file: TFile): HTMLMediaElement | null {
+		const all: HTMLMediaElement[] = [];
+		const collect = (root: Document | ShadowRoot | HTMLElement) => {
+			root.querySelectorAll<HTMLMediaElement>('audio, video').forEach((el) => all.push(el));
+			root.querySelectorAll('*').forEach((el) => {
+				if (el.shadowRoot) collect(el.shadowRoot);
+			});
+		};
+		collect(container);
+
+		const resourcePath = this.getAdapterResourcePath(file);
+		const baseResource = resourcePath?.split('?')[0];
+		const fileName = file.basename;
+
+		for (const media of all) {
+			const candidates = new Set<string>();
+			if (media.currentSrc) candidates.add(media.currentSrc);
+			if (media.src) candidates.add(media.src);
+			media.querySelectorAll('source').forEach((s) => {
+				if (s instanceof HTMLSourceElement && s.src) candidates.add(s.src);
+			});
+			for (const src of candidates) {
+				const base = src.split('?')[0];
+				if (resourcePath && (src === resourcePath || base === baseResource)) return media;
+				try {
+					if (fileName && decodeURIComponent(src).includes(fileName)) return media;
+				} catch { /* ignore */ }
+			}
+		}
+		// Une seule piste dans la vue et c'est la bonne note → on la prend
+		if (all.length === 1) return all[0];
 		return null;
 	}
 
