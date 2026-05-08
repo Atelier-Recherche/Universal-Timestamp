@@ -78,6 +78,19 @@ export class RecordingIndicatorSettingTab extends PluginSettingTab {
 					})
 			);
 
+		new Setting(containerEl)
+			.setName('Regex personnalisée (nom de fichier)')
+			.setDesc('Optionnel. Utilisez une regex avec groupes nommés pour extraire l\'heure de début depuis le nom audio. Groupes supportés : year, month, day, hour, minute, second, time (HHMMSS), time_dot (HH.MM.SS), ddmmyy.')
+			.addTextArea((text) =>
+				text
+					.setPlaceholder('Ex: T(?<time>\\d{6})-(?<ddmmyy>\\d{6})')
+					.setValue(this.plugin.settings.fileNameTimecodeRegex)
+					.onChange(async (value) => {
+						this.plugin.settings.fileNameTimecodeRegex = value.trim();
+						await this.plugin.saveSettings();
+					})
+			);
+
 		containerEl.createEl('h3', { text: 'Notifications' });
 
 		new Setting(containerEl)
@@ -119,6 +132,7 @@ export class RecordingIndicatorSettingTab extends PluginSettingTab {
 			<ul>
 				<li>Utilisez <code>Ctrl+Shift+T</code> pour insérer un horodatage universel à tout moment.</li>
 				<li>Nommez vos fichiers audio avec leur date/heure de démarrage (ex. <code>2025-11-07 16.32.23.m4a</code>) pour pré-remplir automatiquement l'heure de début.</li>
+				<li>Pour des noms personnalisés, configurez la regex (ex. <code>T(?&lt;time&gt;\\d{6})-(?&lt;ddmmyy&gt;\\d{6})</code> ou <code>(?&lt;year&gt;\\d{4})-(?&lt;month&gt;\\d{2})-(?&lt;day&gt;\\d{2}).*?(?&lt;time_dot&gt;\\d{2}\\.\\d{2}\\.\\d{2})</code>).</li>
 				<li>Après import, lancez la commande <em>Associer un fichier audio aux horodatages</em> puis indiquez l'heure exacte de démarrage de l'enregistrement.</li>
 			</ul>
 		`;

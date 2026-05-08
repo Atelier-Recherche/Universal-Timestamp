@@ -9,6 +9,8 @@ interface RecordingIndicatorSettings {
 	timecodeFormat: string;
 	timeOffsetSeconds: number;
 	timecodeAdjustmentSeconds: number;
+	/** Regex personnalisée pour extraire date/heure depuis le nom de fichier audio. */
+	fileNameTimecodeRegex: string;
 	/** Au clic sur un timecode, déplacer la lecture dans le lecteur de la note au lieu d'ouvrir un panneau. */
 	seekTimecodeInPagePlayer: boolean;
 	/** Afficher dans la console les étapes du clic timecode (pour diagnostic). */
@@ -29,6 +31,7 @@ const DEFAULT_SETTINGS: RecordingIndicatorSettings = {
 	timecodeFormat: '[{time}]',
 	timeOffsetSeconds: 0,
 	timecodeAdjustmentSeconds: 10,
+	fileNameTimecodeRegex: '',
 	seekTimecodeInPagePlayer: true,
 	debugTimecodeClick: false
 };
@@ -129,10 +132,12 @@ class LinkRecordingModal extends Modal {
 
 		new Setting(contentEl)
 			.setName('Heure de début')
-			.setDesc('Format recommandé : 2025-11-07 16:32:23. Le nom du fichier est analysé automatiquement lorsque c\'est possible.')
+			.setDesc(
+				'Format recommandé : 16:32:23. Le nom du fichier est analysé automatiquement lorsque c\'est possible (ex. …T213943… pour 21:39:43).'
+			)
 			.addText((text) => {
 				timeInput = text;
-				text.setPlaceholder('YYYY-MM-DD HH:mm:ss');
+				text.setPlaceholder('HH:mm:ss');
 				if (this.startTimeInputValue) {
 					text.setValue(this.startTimeInputValue);
 				}
@@ -149,7 +154,7 @@ class LinkRecordingModal extends Modal {
 			}
 			const parsed = this.plugin.parseStartTimeInput(this.startTimeInputValue);
 			if (!parsed) {
-				new Notice('Heure de début invalide. Utilisez le format YYYY-MM-DD HH:mm[:ss].');
+				new Notice('Heure de début invalide. Utilisez le format HH:mm[:ss].');
 				return;
 			}
 			this.onSubmit(this.selectedFile, parsed);
@@ -798,8 +803,8 @@ export default class RecordingIndicatorPlugin extends Plugin {
 				continue;
 			}
 
-			const offsetSeconds = Math.round((timestamp.getTime() - startTime.getTime()) / 1000);
-			if (offsetSeconds < 0 || offsetSeconds > 24 * 3600) {
+			const offsetSeconds = this.computeOffsetFromTimeOfDay(timestamp, startTime);
+			if (offsetSeconds == null) {
 				skipped++;
 				continue;
 			}
@@ -826,6 +831,38 @@ export default class RecordingIndicatorPlugin extends Plugin {
 		}
 
 		return { replacements, skipped };
+	}
+
+	/**
+	 * Calcule un offset en secondes en ignorant la date.
+	 * Si l'heure du timestamp est "avant" l'heure de début, on considère un passage à minuit.
+	 */
+	private computeOffsetFromTimeOfDay(timestamp: Date, startTime: Date): number | null {
+		const timestampSeconds =
+			timestamp.getHours() * 3600 + timestamp.getMinutes() * 60 + timestamp.getSeconds();
+		const startSeconds =
+			startTime.getHours() * 3600 + startTime.getMinutes() * 60 + startTime.getSeconds();
+
+		if (
+			!Number.isFinite(timestampSeconds) ||
+			!Number.isFinite(startSeconds) ||
+			timestampSeconds < 0 ||
+			startSeconds < 0
+		) {
+			return null;
+		}
+
+		let offset = timestampSeconds - startSeconds;
+		if (offset < 0) {
+			offset += 24 * 3600;
+		}
+
+		// Par sécurité, ne garde que les valeurs d'une journée max.
+		if (offset < 0 || offset >= 24 * 3600) {
+			return null;
+		}
+
+		return offset;
 	}
 
 	private buildPlaceholder(date: Date): string {
@@ -880,13 +917,168 @@ export default class RecordingIndicatorPlugin extends Plugin {
 	}
 
 	parseDateFromFileName(baseName: string): Date | null {
+		const fromCustomRule = this.parseDateFromFileNameWithCustomRegex(baseName);
+		if (fromCustomRule) {
+			return fromCustomRule;
+		}
+
 		const normalized = baseName.replace(/[_]/g, ' ').replace(/[\.]/g, ':');
 		const pattern = /(\d{4})[- ]?(\d{2})[- ]?(\d{2})[ T]?(\d{2}):?(\d{2})(?::(\d{2}))?/;
 		const match = normalized.match(pattern);
-		if (!match) {
+		if (match) {
+			return this.buildDate(match[1], match[2], match[3], match[4], match[5], match[6]);
+		}
+
+		// Formats compacts : …T213943… = 21:39:43 ; segment DDMMYY (6 chiffres) si présent après l’heure.
+		// Ex. 01-T213943-120426-UE168 → 12/04/2026 21:39:43
+		const tCompact = this.parseTTimeAndOptionalDDMMYY(baseName);
+		if (tCompact) {
+			return tCompact;
+		}
+
+		return null;
+	}
+
+	/**
+	 * Règle personnalisée (groupes nommés) pour parser l'heure de début depuis le nom de fichier.
+	 * Groupes supportés :
+	 * - Heure : hour, minute, second ou time (HHMMSS) / time_dot (HH.MM.SS)
+	 * - Date : year+month+day, ou date (YYYYMMDD), ou ddmmyy (DDMMYY)
+	 */
+	private parseDateFromFileNameWithCustomRegex(baseName: string): Date | null {
+		const rawRule = (this.settings.fileNameTimecodeRegex ?? '').trim();
+		if (!rawRule) {
 			return null;
 		}
-		return this.buildDate(match[1], match[2], match[3], match[4], match[5], match[6]);
+
+		let regex: RegExp;
+		try {
+			regex = new RegExp(rawRule, 'i');
+		} catch {
+			return null;
+		}
+
+		const match = baseName.match(regex);
+		const groups = match?.groups;
+		if (!groups) {
+			return null;
+		}
+
+		const now = new Date();
+		let year = now.getFullYear();
+		let month = now.getMonth() + 1;
+		let day = now.getDate();
+		let hour: number | null = null;
+		let minute: number | null = null;
+		let second = 0;
+
+		if (groups.year && groups.month && groups.day) {
+			year = Number(groups.year);
+			month = Number(groups.month);
+			day = Number(groups.day);
+		} else if (groups.date && /^\d{8}$/.test(groups.date)) {
+			year = Number(groups.date.slice(0, 4));
+			month = Number(groups.date.slice(4, 6));
+			day = Number(groups.date.slice(6, 8));
+		} else if (groups.ddmmyy && /^\d{6}$/.test(groups.ddmmyy)) {
+			day = Number(groups.ddmmyy.slice(0, 2));
+			month = Number(groups.ddmmyy.slice(2, 4));
+			year = 2000 + Number(groups.ddmmyy.slice(4, 6));
+		}
+
+		if (groups.hour && groups.minute) {
+			hour = Number(groups.hour);
+			minute = Number(groups.minute);
+			if (groups.second) {
+				second = Number(groups.second);
+			}
+		} else if (groups.time && /^\d{6}$/.test(groups.time)) {
+			hour = Number(groups.time.slice(0, 2));
+			minute = Number(groups.time.slice(2, 4));
+			second = Number(groups.time.slice(4, 6));
+		} else if (groups.time_dot && /^\d{2}\.\d{2}\.\d{2}$/.test(groups.time_dot)) {
+			const [h, m, s] = groups.time_dot.split('.');
+			hour = Number(h);
+			minute = Number(m);
+			second = Number(s);
+		}
+
+		if (hour == null || minute == null) {
+			return null;
+		}
+
+		if (
+			!Number.isFinite(year) ||
+			!Number.isFinite(month) ||
+			!Number.isFinite(day) ||
+			!Number.isFinite(hour) ||
+			!Number.isFinite(minute) ||
+			!Number.isFinite(second)
+		) {
+			return null;
+		}
+
+		if (month < 1 || month > 12 || day < 1 || day > 31 || hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59) {
+			return null;
+		}
+
+		return this.buildDate(
+			String(year).padStart(4, '0'),
+			String(month).padStart(2, '0'),
+			String(day).padStart(2, '0'),
+			String(hour).padStart(2, '0'),
+			String(minute).padStart(2, '0'),
+			String(second).padStart(2, '0')
+		);
+	}
+
+	/** T + HHMMSS (6 chiffres), suivi de DDMMYY (jour / mois / année sur 2 chiffres). */
+	private parseTTimeAndOptionalDDMMYY(baseName: string): Date | null {
+		let hh: string;
+		let mm: string;
+		let ss: string;
+		let dayStr: string;
+		let monthStr: string;
+		let yyStr: string;
+
+		const spaced = baseName.match(/[Tt](\d{2})(\d{2})(\d{2})[-_. ]?(\d{2})(\d{2})(\d{2})/);
+		if (spaced) {
+			[, hh, mm, ss, dayStr, monthStr, yyStr] = spaced;
+		} else {
+			const glued = baseName.match(/[Tt](\d{6})(\d{6})/);
+			if (!glued) {
+				return null;
+			}
+			const ts = glued[1];
+			const ds = glued[2];
+			hh = ts.slice(0, 2);
+			mm = ts.slice(2, 4);
+			ss = ts.slice(4, 6);
+			dayStr = ds.slice(0, 2);
+			monthStr = ds.slice(2, 4);
+			yyStr = ds.slice(4, 6);
+		}
+
+		const h = Number(hh);
+		const min = Number(mm);
+		const sec = Number(ss);
+		const day = Number(dayStr);
+		const month = Number(monthStr);
+		const yy = Number(yyStr);
+
+		if (h > 23 || min > 59 || sec > 59 || day < 1 || day > 31 || month < 1 || month > 12 || yy > 99) {
+			return null;
+		}
+
+		const year = 2000 + yy;
+		return this.buildDate(
+			String(year),
+			String(month).padStart(2, '0'),
+			String(day).padStart(2, '0'),
+			hh,
+			mm,
+			ss
+		);
 	}
 
 	parseStartTimeInput(input: string): Date | null {
@@ -895,8 +1087,22 @@ export default class RecordingIndicatorPlugin extends Plugin {
 		if (!normalized) return null;
 
 		normalized = normalized.replace(/[_T]/g, ' ').replace(/\./g, ':');
+		const now = new Date();
 
-		let match = normalized.match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})(?::(\d{2}))?/);
+		let match = normalized.match(/^(\d{2}):(\d{2})(?::(\d{2}))?$/);
+		if (match) {
+			return this.buildDate(
+				String(now.getFullYear()),
+				String(now.getMonth() + 1).padStart(2, '0'),
+				String(now.getDate()).padStart(2, '0'),
+				match[1],
+				match[2],
+				match[3] ?? '0'
+			);
+		}
+
+		// Compatibilité descendante : accepter encore les anciennes valeurs date+heure.
+		match = normalized.match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})(?::(\d{2}))?/);
 		if (match) {
 			return this.buildDate(match[1], match[2], match[3], match[4], match[5], match[6]);
 		}
@@ -927,14 +1133,11 @@ export default class RecordingIndicatorPlugin extends Plugin {
 	}
 
 	formatStartTimeForInput(date: Date): string {
-		const year = date.getFullYear().toString().padStart(4, '0');
-		const month = (date.getMonth() + 1).toString().padStart(2, '0');
-		const day = date.getDate().toString().padStart(2, '0');
 		const hours = date.getHours().toString().padStart(2, '0');
 		const minutes = date.getMinutes().toString().padStart(2, '0');
 		const seconds = date.getSeconds().toString().padStart(2, '0');
 
-		return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+		return `${hours}:${minutes}:${seconds}`;
 	}
 
 	private attachEditorHandlers(view?: MarkdownView | null) {
