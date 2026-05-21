@@ -30,6 +30,7 @@ export class TranscriptView extends ItemView {
 	private renderEnd = 0;
 	private saveTimer: number | null = null;
 	private isSaving = false;
+	sourceNotePath: string | null = null;
 
 	constructor(leaf: WorkspaceLeaf, plugin: RecordingIndicatorPlugin) {
 		super(leaf);
@@ -67,7 +68,81 @@ export class TranscriptView extends ItemView {
 		this.contentEl.empty();
 	}
 
-	async openTranscript(file: TFile, offsetSeconds: number): Promise<boolean> {
+	isForNote(notePath: string): boolean {
+		return this.sourceNotePath === notePath;
+	}
+
+	isChunkInView(): boolean {
+		const el = this.bodyEl?.querySelector(
+			`.ut-transcript-chunk[data-segment-index="${this.activeSegmentIndex}"]`
+		);
+		return el ? this.isElementInScrollView(el) : false;
+	}
+
+	/** Surligne le segment à l'offset (sync lecture audio). */
+	highlightAtOffset(offsetSeconds: number, options: { scroll?: boolean } = {}): boolean {
+		if (!this.segments.length) {
+			return false;
+		}
+
+		const idx = findSegmentIndexAt(this.segments, offsetSeconds);
+		if (idx < 0) {
+			return false;
+		}
+
+		const editing =
+			!!document.activeElement?.closest('.ut-transcript-chunk[contenteditable="true"]') &&
+			this.contentEl.contains(document.activeElement);
+
+		const changed = idx !== this.activeSegmentIndex;
+		this.activeSegmentIndex = idx;
+		this.activeParagraphIndex = findParagraphIndexForSegment(this.paragraphs, idx);
+		this.plugin.lastTranscriptOffset = offsetSeconds;
+
+		if (changed) {
+			this.ensureWindowContainsActiveParagraph();
+			if (!this.bodyEl?.querySelector(`[data-segment-index="${idx}"]`)) {
+				this.render();
+			} else {
+				this.updateActiveHighlight(true);
+			}
+			this.updateHeaderMeta();
+			return true;
+		}
+
+		if (options.scroll && !editing) {
+			this.scrollActiveChunkIntoView();
+		}
+		return false;
+	}
+
+	private isElementInScrollView(el: Element): boolean {
+		if (!this.scrollEl) {
+			return false;
+		}
+		const er = el.getBoundingClientRect();
+		const sr = this.scrollEl.getBoundingClientRect();
+		return er.top >= sr.top - 8 && er.bottom <= sr.bottom + 8;
+	}
+
+	private scrollActiveChunkIntoView(): void {
+		const active = this.bodyEl?.querySelector(
+			`.ut-transcript-chunk[data-segment-index="${this.activeSegmentIndex}"]`
+		);
+		if (active && !this.isElementInScrollView(active)) {
+			active.scrollIntoView({ block: 'center', behavior: 'smooth' });
+		}
+	}
+
+	async openTranscript(
+		file: TFile,
+		offsetSeconds: number,
+		sourceNote?: TFile | null
+	): Promise<boolean> {
+		if (sourceNote) {
+			this.sourceNotePath = sourceNote.path;
+		}
+
 		const segments = await this.plugin.transcriptCache.loadSegments(file);
 		if (!segments) {
 			return false;
@@ -124,7 +199,7 @@ export class TranscriptView extends ItemView {
 		);
 	}
 
-	private updateActiveHighlight(): void {
+	private updateActiveHighlight(scroll = true): void {
 		if (!this.bodyEl) {
 			return;
 		}
@@ -136,9 +211,11 @@ export class TranscriptView extends ItemView {
 		);
 		if (active) {
 			active.addClass('ut-transcript-chunk-active');
-			requestAnimationFrame(() => {
-				active.scrollIntoView({ block: 'center', behavior: 'smooth' });
-			});
+			if (scroll) {
+				requestAnimationFrame(() => {
+					active.scrollIntoView({ block: 'center', behavior: 'smooth' });
+				});
+			}
 		} else {
 			this.render();
 		}

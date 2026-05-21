@@ -138,6 +138,30 @@ export class RecordingIndicatorSettingTab extends PluginSettingTab {
 					})
 			);
 
+		new Setting(containerEl)
+			.setName('Surlignage pendant la lecture')
+			.setDesc(
+				'Synchronise la transcription avec le lecteur audio de la note : le texte surligné suit la lecture en temps réel.'
+			)
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.syncTranscriptWithPlayback).onChange(async (value) => {
+					this.plugin.settings.syncTranscriptWithPlayback = value;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName('Ouvrir la transcription à la lecture')
+			.setDesc(
+				'Ouvre automatiquement la vue transcription en panneau scindé quand vous lancez la lecture audio (si une transcription est liée).'
+			)
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.autoOpenTranscriptOnPlayback).onChange(async (value) => {
+					this.plugin.settings.autoOpenTranscriptOnPlayback = value;
+					await this.plugin.saveSettings();
+				})
+			);
+
 		containerEl.createEl('h3', { text: 'Lecture' });
 
 		new Setting(containerEl)

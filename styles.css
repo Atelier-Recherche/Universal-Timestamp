@@ -276,6 +276,10 @@
     box-shadow: 0 0 0 1px rgba(255, 200, 50, 0.4);
 }
 
+.ut-transcript-chunk-active.ut-transcript-chunk-sync {
+    transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
 .ut-transcript-load-more {
     align-self: center;
     margin: 8px 0;

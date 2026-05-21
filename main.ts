@@ -23,6 +23,10 @@ export interface RecordingIndicatorSettings {
 	enableTranscriptLinking: boolean;
 	/** Comportement au clic sur un timecode lié. */
 	timecodeClickMode: TimecodeClickMode;
+	/** Surligner la transcription pendant la lecture audio dans la note. */
+	syncTranscriptWithPlayback: boolean;
+	/** Ouvrir la vue transcription au démarrage de la lecture si elle est fermée. */
+	autoOpenTranscriptOnPlayback: boolean;
 }
 
 interface PlaceholderMatch {
@@ -43,7 +47,9 @@ const DEFAULT_SETTINGS: RecordingIndicatorSettings = {
 	seekTimecodeInPagePlayer: true,
 	debugTimecodeClick: false,
 	enableTranscriptLinking: true,
-	timecodeClickMode: 'both'
+	timecodeClickMode: 'both',
+	syncTranscriptWithPlayback: true,
+	autoOpenTranscriptOnPlayback: true
 };
 
 const TIMECODE_PLACEHOLDER_REGEX = /%%REC\{"time":"([^"]+)"\}%%(\[[^\]]+\]|\([^)]+\)|[^\s]+)/g;
@@ -739,11 +745,13 @@ export default class RecordingIndicatorPlugin extends Plugin {
 			this.attachEditorHandlers();
 			// Cache lazy - ne sera rempli que quand nécessaire
 			this.observeMediaPlayers();
+			this.scanAndAttachPlaybackSync();
 		});
 		this.registerEvent(
 			this.app.workspace.on('active-leaf-change', () => {
 				this.attachEditorHandlers();
 				this.observeMediaPlayers();
+				this.scanAndAttachPlaybackSync();
 			})
 		);
 
@@ -1862,6 +1870,10 @@ export default class RecordingIndicatorPlugin extends Plugin {
 								this.observeRoot(host.shadowRoot);
 							}
 						});
+
+						node.querySelectorAll<HTMLMediaElement>('audio, video').forEach((media) => {
+							this.tryAttachPlaybackSync(media);
+						});
 					} else if (node instanceof DocumentFragment) {
 						node.querySelectorAll<HTMLElement>('[data-media-player]').forEach((child) =>
 							this.decorateMediaPlayer(child)
@@ -1871,6 +1883,10 @@ export default class RecordingIndicatorPlugin extends Plugin {
 							if (host.shadowRoot) {
 								this.observeRoot(host.shadowRoot);
 							}
+						});
+
+						node.querySelectorAll<HTMLMediaElement>('audio, video').forEach((media) => {
+							this.tryAttachPlaybackSync(media);
 						});
 					}
 				});
@@ -2000,6 +2016,11 @@ export default class RecordingIndicatorPlugin extends Plugin {
 	private decorateMediaPlayer(player: HTMLElement) {
 		if (!player || player.dataset.utEnhanced === 'true') {
 			return;
+		}
+
+		const media = player.querySelector('audio, video') as HTMLMediaElement | null;
+		if (media) {
+			this.tryAttachPlaybackSync(media);
 		}
 
 		const computed = window.getComputedStyle(player);
@@ -2267,7 +2288,7 @@ export default class RecordingIndicatorPlugin extends Plugin {
 			return false;
 		}
 
-		const ok = await view.openTranscript(transcript, offsetSeconds);
+		const ok = await view.openTranscript(transcript, offsetSeconds, note);
 		if (!ok) {
 			if (this.settings.showNotifications) {
 				new Notice('Fichier de transcription invalide (format Vibe attendu).');
@@ -2277,6 +2298,186 @@ export default class RecordingIndicatorPlugin extends Plugin {
 			}
 		}
 		return ok;
+	}
+
+	getTranscriptViewForNote(notePath: string): TranscriptView | null {
+		for (const leaf of this.app.workspace.getLeavesOfType(TRANSCRIPT_VIEW_TYPE)) {
+			const view = leaf.view;
+			if (view instanceof TranscriptView && view.isForNote(notePath)) {
+				return view;
+			}
+		}
+		return null;
+	}
+
+	scanAndAttachPlaybackSync(): void {
+		if (!this.settings.syncTranscriptWithPlayback || !this.settings.enableTranscriptLinking) {
+			return;
+		}
+
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!view?.file || !this.getLinkedTranscriptFile(view.file)) {
+			return;
+		}
+
+		const collectMedia = (root: Document | ShadowRoot | HTMLElement, out: HTMLMediaElement[]) => {
+			root.querySelectorAll<HTMLMediaElement>('audio, video').forEach((el) => out.push(el));
+			root.querySelectorAll('*').forEach((el) => {
+				if (el.shadowRoot) {
+					collectMedia(el.shadowRoot, out);
+				}
+			});
+		};
+
+		const mediaElements: HTMLMediaElement[] = [];
+		if (view.contentEl) {
+			collectMedia(view.contentEl, mediaElements);
+		}
+		collectMedia(document, mediaElements);
+
+		for (const media of mediaElements) {
+			this.tryAttachPlaybackSync(media);
+		}
+	}
+
+	private tryAttachPlaybackSync(media: HTMLMediaElement): void {
+		if (!this.settings.syncTranscriptWithPlayback || !this.settings.enableTranscriptLinking) {
+			return;
+		}
+		if (media.dataset.utPlaybackSync === 'true') {
+			return;
+		}
+
+		const ctx = this.findNoteContextForMedia(media);
+		if (!ctx || !this.getLinkedTranscriptFile(ctx.note)) {
+			return;
+		}
+
+		media.dataset.utPlaybackSync = 'true';
+		const noteFile = ctx.note;
+		let lastTick = -1;
+
+		const syncNow = (forceScroll = false) => {
+			const t = media.currentTime;
+			const tick = Math.floor(t * 4);
+			if (!forceScroll && tick === lastTick && !media.paused) {
+				return;
+			}
+			lastTick = tick;
+			this.syncTranscriptToPlayback(noteFile, t, forceScroll);
+		};
+
+		const onPlay = () => {
+			void this.onPlaybackStarted(noteFile, media.currentTime);
+			syncNow(true);
+		};
+
+		const onTimeUpdate = () => {
+			if (!media.paused) {
+				syncNow(false);
+			}
+		};
+
+		const onSeeked = () => {
+			lastTick = -1;
+			syncNow(true);
+		};
+
+		const onPause = () => {
+			lastTick = -1;
+			syncNow(true);
+		};
+
+		media.addEventListener('play', onPlay);
+		media.addEventListener('timeupdate', onTimeUpdate);
+		media.addEventListener('seeked', onSeeked);
+		media.addEventListener('pause', onPause);
+
+		this.register(() => {
+			media.removeEventListener('play', onPlay);
+			media.removeEventListener('timeupdate', onTimeUpdate);
+			media.removeEventListener('seeked', onSeeked);
+			media.removeEventListener('pause', onPause);
+			delete media.dataset.utPlaybackSync;
+		});
+	}
+
+	private async onPlaybackStarted(note: TFile, offsetSeconds: number): Promise<void> {
+		if (!this.settings.autoOpenTranscriptOnPlayback) {
+			return;
+		}
+		if (this.getTranscriptViewForNote(note.path)) {
+			return;
+		}
+		await this.openTranscriptAtOffset(note, offsetSeconds);
+	}
+
+	private syncTranscriptToPlayback(
+		note: TFile,
+		offsetSeconds: number,
+		forceScroll = false
+	): void {
+		const view = this.getTranscriptViewForNote(note.path);
+		if (!view) {
+			return;
+		}
+		view.highlightAtOffset(offsetSeconds, { scroll: forceScroll || !view.isChunkInView() });
+	}
+
+	private findNoteContextForMedia(
+		media: HTMLMediaElement
+	): { note: TFile; audio: TFile } | null {
+		const audioFile = this.getAudioFileFromMediaElement(media);
+		if (!audioFile) {
+			return null;
+		}
+
+		const active = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (active?.file) {
+			const linked = this.getLinkedAudioFile(active.file);
+			if (linked?.path === audioFile.path) {
+				return { note: active.file, audio: audioFile };
+			}
+		}
+
+		for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
+			const view = leaf.view;
+			if (!(view instanceof MarkdownView) || !view.file) {
+				continue;
+			}
+			const linked = this.getLinkedAudioFile(view.file);
+			if (linked?.path !== audioFile.path) {
+				continue;
+			}
+			if (view.contentEl?.contains(media)) {
+				return { note: view.file, audio: audioFile };
+			}
+		}
+
+		return null;
+	}
+
+	private getAudioFileFromMediaElement(media: HTMLMediaElement): TFile | null {
+		const candidates = new Set<string>();
+		if (media.currentSrc) {
+			candidates.add(media.currentSrc);
+		}
+		if (media.src) {
+			candidates.add(media.src);
+		}
+		media.querySelectorAll('source').forEach((source) => {
+			if (source instanceof HTMLSourceElement && source.src) {
+				candidates.add(source.src);
+			}
+		});
+
+		for (const candidate of candidates) {
+			const file = this.getFileFromResourcePath(candidate);
+			if (file && this.isAudioFile(file)) {
+				return file;
+			}
+		}
+		return null;
 	}
 
 	shouldShowTimecodeActionButtons(note: TFile): boolean {
