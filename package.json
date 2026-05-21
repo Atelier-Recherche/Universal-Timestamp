@@ -1,6 +1,6 @@
 {
   "name": "universal-timestamp",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Plugin Obsidian pour insérer des horodatages universels et les associer à des enregistrements externes",
   "main": "main.js",
   "scripts": {
