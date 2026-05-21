@@ -103,6 +103,41 @@ export class RecordingIndicatorSettingTab extends PluginSettingTab {
 				})
 			);
 
+		containerEl.createEl('h3', { text: 'Transcription Vibe' });
+
+		new Setting(containerEl)
+			.setName('Lier les transcriptions JSON')
+			.setDesc(
+				'Permet d\'associer un fichier JSON Vibe (start/stop/text) à la note et d\'ouvrir la transcription au clic sur un timecode.'
+			)
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.enableTranscriptLinking).onChange(async (value) => {
+					this.plugin.settings.enableTranscriptLinking = value;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName('Clic sur un timecode')
+			.setDesc(
+				'Audio : seek dans le lecteur. Transcription : vue scindée (sans ouvrir le fichier audio). Les deux : seek + transcription. Deux boutons : icônes lecture et transcription à côté de chaque lien (éditeur et lecture).'
+			)
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOption('audio', 'Audio uniquement')
+					.addOption('transcript', 'Transcription uniquement')
+					.addOption('both', 'Audio et transcription')
+					.addOption('dual_buttons', 'Deux boutons (▶ / 📝)')
+					.setValue(this.plugin.settings.timecodeClickMode)
+					.onChange(async (value) => {
+						const modes = ['audio', 'transcript', 'both', 'dual_buttons'] as const;
+						if (modes.includes(value as (typeof modes)[number])) {
+							this.plugin.settings.timecodeClickMode = value as (typeof modes)[number];
+							await this.plugin.saveSettings();
+						}
+					})
+			);
+
 		containerEl.createEl('h3', { text: 'Lecture' });
 
 		new Setting(containerEl)

@@ -1,9 +1,13 @@
-import { Plugin, Editor, MarkdownView, Notice, TFile, App, Modal, Setting, normalizePath, CachedMetadata, setIcon, MarkdownPostProcessorContext, MarkdownRenderChild, editorLivePreviewField } from 'obsidian';
+import { Plugin, Editor, MarkdownView, Notice, TFile, App, Modal, Setting, normalizePath, CachedMetadata, setIcon, MarkdownPostProcessorContext, MarkdownRenderChild, editorLivePreviewField, WorkspaceLeaf } from 'obsidian';
 import { RecordingIndicatorSettingTab } from './settings';
 import { Decoration, DecorationSet, EditorView, keymap, PluginValue, ViewPlugin, ViewUpdate, WidgetType } from '@codemirror/view';
 import { RangeSetBuilder, Prec } from '@codemirror/state';
+import { TranscriptCache, transcriptBasenamesForAudio } from './transcript';
+import { TRANSCRIPT_VIEW_TYPE, TranscriptView } from './transcript-view';
 
-interface RecordingIndicatorSettings {
+export type TimecodeClickMode = 'audio' | 'transcript' | 'both' | 'dual_buttons';
+
+export interface RecordingIndicatorSettings {
 	showNotifications: boolean;
 	showSeconds: boolean;
 	timecodeFormat: string;
@@ -15,6 +19,10 @@ interface RecordingIndicatorSettings {
 	seekTimecodeInPagePlayer: boolean;
 	/** Afficher dans la console les étapes du clic timecode (pour diagnostic). */
 	debugTimecodeClick: boolean;
+	/** Active l'association et l'ouverture des transcriptions Vibe (JSON). */
+	enableTranscriptLinking: boolean;
+	/** Comportement au clic sur un timecode lié. */
+	timecodeClickMode: TimecodeClickMode;
 }
 
 interface PlaceholderMatch {
@@ -33,10 +41,13 @@ const DEFAULT_SETTINGS: RecordingIndicatorSettings = {
 	timecodeAdjustmentSeconds: 10,
 	fileNameTimecodeRegex: '',
 	seekTimecodeInPagePlayer: true,
-	debugTimecodeClick: false
+	debugTimecodeClick: false,
+	enableTranscriptLinking: true,
+	timecodeClickMode: 'both'
 };
 
 const TIMECODE_PLACEHOLDER_REGEX = /%%REC\{"time":"([^"]+)"\}%%(\[[^\]]+\]|\([^)]+\)|[^\s]+)/g;
+const WIKI_TIMECODE_LINK_REGEX = /\[\[([^\]#]+)#t=(\d+)(?:\|[^\]]*)?\]\]/g;
 
 const AUDIO_EXTENSIONS = new Set([
 	'mp3',
@@ -52,16 +63,19 @@ const AUDIO_EXTENSIONS = new Set([
 
 class LinkRecordingModal extends Modal {
 	private plugin: RecordingIndicatorPlugin;
-	private onSubmit: (file: TFile, startTime: Date) => void;
+	private onSubmit: (file: TFile, startTime: Date, transcriptFile: TFile | null) => void;
 	private audioFiles: TFile[];
+	private transcriptFiles: TFile[];
 	private selectedFile: TFile | null;
+	private selectedTranscript: TFile | null;
 	private startTimeInputValue: string;
 	private fileLocked: boolean;
+	private noneTranscriptValue = '__none__';
 
 	constructor(
 		app: App,
 		plugin: RecordingIndicatorPlugin,
-		onSubmit: (file: TFile, startTime: Date) => void,
+		onSubmit: (file: TFile, startTime: Date, transcriptFile: TFile | null) => void,
 		presetFile?: TFile | null,
 		fileLocked: boolean = false
 	) {
@@ -70,6 +84,7 @@ class LinkRecordingModal extends Modal {
 		this.onSubmit = onSubmit;
 		this.fileLocked = fileLocked;
 		this.audioFiles = plugin.getAudioFiles();
+		this.transcriptFiles = plugin.getTranscriptJsonFiles();
 
 		if (presetFile && !this.audioFiles.some((file) => file.path === presetFile.path)) {
 			this.audioFiles.unshift(presetFile);
@@ -77,6 +92,9 @@ class LinkRecordingModal extends Modal {
 
 		this.selectedFile = presetFile ?? (this.audioFiles.length > 0 ? this.audioFiles[0] : null);
 		this.startTimeInputValue = this.selectedFile ? plugin.getDefaultStartTimeString(this.selectedFile) : '';
+		this.selectedTranscript = this.selectedFile
+			? plugin.findTranscriptForAudio(this.selectedFile, this.transcriptFiles)
+			: null;
 	}
 
 	onOpen() {
@@ -84,7 +102,7 @@ class LinkRecordingModal extends Modal {
 		contentEl.empty();
 		contentEl.addClass('recording-link-modal');
 
-		contentEl.createEl('h2', { text: 'Associer un fichier audio' });
+		contentEl.createEl('h2', { text: 'Associer un enregistrement' });
 
 		if (this.audioFiles.length === 0) {
 			contentEl.createEl('p', {
@@ -125,6 +143,36 @@ class LinkRecordingModal extends Modal {
 								this.startTimeInputValue = suggestion;
 								timeInput.setValue(suggestion);
 							}
+							const match = this.plugin.findTranscriptForAudio(file, this.transcriptFiles);
+							if (match) {
+								this.selectedTranscript = match;
+								transcriptDropdown?.setValue(match.path);
+							}
+						}
+					});
+				});
+		}
+
+		let transcriptDropdown: import('obsidian').DropdownComponent | undefined;
+		if (this.plugin.settings.enableTranscriptLinking && this.transcriptFiles.length > 0) {
+			new Setting(contentEl)
+				.setName('Transcription (JSON Vibe)')
+				.setDesc('Optionnel. Même nom de base que l\'audio si disponible (ex. enregistrement.m4a → enregistrement.json).')
+				.addDropdown((dropdown) => {
+					transcriptDropdown = dropdown;
+					dropdown.addOption(this.noneTranscriptValue, '— Aucune —');
+					this.transcriptFiles.forEach((file) => dropdown.addOption(file.path, file.basename));
+					if (this.selectedTranscript) {
+						dropdown.setValue(this.selectedTranscript.path);
+					} else {
+						dropdown.setValue(this.noneTranscriptValue);
+					}
+					dropdown.onChange((value) => {
+						if (value === this.noneTranscriptValue) {
+							this.selectedTranscript = null;
+						} else {
+							this.selectedTranscript =
+								this.transcriptFiles.find((f) => f.path === value) ?? null;
 						}
 					});
 				});
@@ -157,7 +205,9 @@ class LinkRecordingModal extends Modal {
 				new Notice('Heure de début invalide. Utilisez le format HH:mm[:ss].');
 				return;
 			}
-			this.onSubmit(this.selectedFile, parsed);
+			const transcript =
+				this.plugin.settings.enableTranscriptLinking ? this.selectedTranscript : null;
+			this.onSubmit(this.selectedFile, parsed, transcript);
 			this.close();
 		};
 
@@ -379,6 +429,98 @@ class TimecodeWidgetCM extends WidgetType {
 	}
 }
 
+class TimecodeLinkActionsWidgetCM extends WidgetType {
+	constructor(
+		private plugin: RecordingIndicatorPlugin,
+		private sourcePath: string,
+		private audioPath: string,
+		private offsetSeconds: number
+	) {
+		super();
+	}
+
+	toDOM(): HTMLElement {
+		const wrap = document.createElement('span');
+		wrap.addClass('ut-timecode-wrap', 'ut-timecode-wrap-cm');
+		const note = this.plugin.app.vault.getAbstractFileByPath(this.sourcePath);
+		if (note instanceof TFile) {
+			this.plugin.appendTimecodeActionButtons(wrap, note, {
+				path: this.audioPath,
+				offsetSeconds: this.offsetSeconds
+			});
+		}
+		return wrap;
+	}
+
+	ignoreEvent(): boolean {
+		return false;
+	}
+}
+
+class TimecodeLinkActionsViewPlugin implements PluginValue {
+	decorations: DecorationSet;
+
+	constructor(
+		private view: EditorView,
+		private plugin: RecordingIndicatorPlugin
+	) {
+		this.decorations = this.buildDecorations(view);
+	}
+
+	update(update: ViewUpdate) {
+		if (update.docChanged || update.viewportChanged) {
+			this.decorations = this.buildDecorations(update.view);
+		}
+	}
+
+	destroy() {}
+
+	buildDecorations(view: EditorView): DecorationSet {
+		const activeView = this.plugin.app.workspace.getActiveViewOfType(MarkdownView);
+		const note = activeView?.file;
+		if (!note || !this.plugin.shouldShowTimecodeActionButtons(note)) {
+			return Decoration.none;
+		}
+
+		const builder = new RangeSetBuilder<Decoration>();
+		const sourcePath = note.path;
+
+		for (const { from, to } of view.visibleRanges) {
+			const text = view.state.doc.sliceString(from, to);
+			let match: RegExpExecArray | null;
+			const regex = new RegExp(WIKI_TIMECODE_LINK_REGEX.source, 'g');
+
+			while ((match = regex.exec(text)) !== null) {
+				const end = from + match.index + match[0].length;
+				if (end > view.state.doc.length) {
+					continue;
+				}
+				const audioPath = match[1].trim();
+				const offsetSeconds = parseInt(match[2], 10);
+				if (!audioPath || !Number.isFinite(offsetSeconds)) {
+					continue;
+				}
+
+				builder.add(
+					end,
+					end,
+					Decoration.widget({
+						side: 1,
+						widget: new TimecodeLinkActionsWidgetCM(
+							this.plugin,
+							sourcePath,
+							audioPath,
+							offsetSeconds
+						)
+					})
+				);
+			}
+		}
+
+		return builder.finish();
+	}
+}
+
 class TimecodeViewPlugin implements PluginValue {
 	decorations: DecorationSet;
 
@@ -434,6 +576,19 @@ class TimecodeViewPlugin implements PluginValue {
 const createTimecodeViewPlugin = (plugin: RecordingIndicatorPlugin) => {
 	return ViewPlugin.fromClass(
 		class extends TimecodeViewPlugin {
+			constructor(view: EditorView) {
+				super(view, plugin);
+			}
+		},
+		{
+			decorations: (value) => value.decorations
+		}
+	);
+};
+
+const createTimecodeLinkActionsViewPlugin = (plugin: RecordingIndicatorPlugin) => {
+	return ViewPlugin.fromClass(
+		class extends TimecodeLinkActionsViewPlugin {
 			constructor(view: EditorView) {
 				super(view, plugin);
 			}
@@ -507,6 +662,8 @@ const timecodeAtomicDeleteKeymap = Prec.high(
 
 export default class RecordingIndicatorPlugin extends Plugin {
 	settings: RecordingIndicatorSettings;
+	transcriptCache = new TranscriptCache(this.app);
+	lastTranscriptOffset = 0;
 	private promptedAssociations = new Set<string>();
 	private attachedEditors = new WeakSet<any>();
 	private resourcePathCache = new Map<string, TFile>();
@@ -552,11 +709,31 @@ export default class RecordingIndicatorPlugin extends Plugin {
 			callback: () => this.openLinkRecordingModal()
 		});
 
-		this.registerMarkdownPostProcessor((element, context) => {
-			this.processTimecodeWidgets(element, context);
+		this.registerView(TRANSCRIPT_VIEW_TYPE, (leaf) => new TranscriptView(leaf, this));
+
+		this.addCommand({
+			id: 'open-linked-transcript',
+			name: 'Ouvrir la transcription liée',
+			callback: () => {
+				const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+				if (!view?.file) {
+					new Notice('Ouvrez une note Markdown avec une transcription liée.');
+					return;
+				}
+				void this.openTranscriptAtOffset(view.file, this.lastTranscriptOffset);
+			}
 		});
 
-		this.registerEditorExtension([createTimecodeViewPlugin(this), timecodeAtomicDeleteKeymap]);
+		this.registerMarkdownPostProcessor((element, context) => {
+			this.processTimecodeWidgets(element, context);
+			this.processTimecodeLinkActions(element, context);
+		});
+
+		this.registerEditorExtension([
+			createTimecodeViewPlugin(this),
+			createTimecodeLinkActionsViewPlugin(this),
+			timecodeAtomicDeleteKeymap
+		]);
 
 		this.app.workspace.onLayoutReady(() => {
 			this.attachEditorHandlers();
@@ -615,7 +792,13 @@ export default class RecordingIndicatorPlugin extends Plugin {
 		);
 		this.registerEvent(
 			this.app.vault.on('modify', (file) => {
-				if (!(file instanceof TFile) || !this.isAudioFile(file)) {
+				if (!(file instanceof TFile)) {
+					return;
+				}
+				if (file.extension.toLowerCase() === 'json') {
+					this.transcriptCache.invalidate(file.path);
+				}
+				if (!this.isAudioFile(file)) {
 					return;
 				}
 				// Debounce pour éviter les scans trop fréquents
@@ -703,24 +886,38 @@ export default class RecordingIndicatorPlugin extends Plugin {
 		new LinkRecordingModal(
 			this.app,
 			this,
-			(file, startTime) => {
-				void this.linkRecordingToActiveNote(file, startTime);
+			(file, startTime, transcriptFile) => {
+				void this.linkRecordingToActiveNote(file, startTime, transcriptFile);
 			},
 			presetFile,
 			fileLocked
 		).open();
 	}
 
-	async linkRecordingToActiveNote(file: TFile, startTime: Date) {
+	async linkRecordingToActiveNote(file: TFile, startTime: Date, transcriptFile: TFile | null = null) {
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (!view || !view.file) {
 			new Notice('Ouvrez une note Markdown pour associer un enregistrement.');
 			return;
 		}
 
+		const resolvedTranscript =
+			transcriptFile ??
+			(this.settings.enableTranscriptLinking
+				? this.findTranscriptForAudio(file, this.getTranscriptJsonFiles())
+				: null);
+
 		await this.app.fileManager.processFrontMatter(view.file, (frontmatter) => {
 			frontmatter['audio_file'] = this.app.metadataCache.fileToLinktext(file, view.file!.path);
 			frontmatter['audio_start_time'] = this.formatStartTimeForInput(startTime);
+			if (resolvedTranscript && this.settings.enableTranscriptLinking) {
+				frontmatter['transcript_file'] = this.app.metadataCache.fileToLinktext(
+					resolvedTranscript,
+					view.file!.path
+				);
+			} else {
+				delete frontmatter['transcript_file'];
+			}
 		});
 
 		const editor = view.editor;
@@ -1270,11 +1467,31 @@ export default class RecordingIndicatorPlugin extends Plugin {
 	 */
 	private handleTimecodeLinkClick(e: MouseEvent): void {
 		const dbg = this.settings.debugTimecodeClick;
-		if (!this.settings.seekTimecodeInPagePlayer || e.button !== 0) {
+		if (e.button !== 0) {
 			return;
 		}
 
 		const target = e.target as HTMLElement;
+		if (target?.closest?.('.ut-timecode-action')) {
+			return;
+		}
+
+		const clickMode = this.getEffectiveTimecodeClickMode();
+		if (clickMode === 'dual_buttons') {
+			return;
+		}
+
+		const wantsAudio =
+			this.settings.seekTimecodeInPagePlayer &&
+			(clickMode === 'audio' || clickMode === 'both');
+		const wantsTranscript =
+			this.settings.enableTranscriptLinking &&
+			(clickMode === 'transcript' || clickMode === 'both');
+
+		if (!wantsAudio && !wantsTranscript) {
+			return;
+		}
+
 		const inEditor = target?.closest?.('.cm-editor');
 		const inPreview = target?.closest?.('.markdown-preview-view');
 		if (dbg && (inEditor || inPreview)) {
@@ -1291,19 +1508,23 @@ export default class RecordingIndicatorPlugin extends Plugin {
 		if (!link) {
 			link = target?.closest?.('[data-href*="#t="]');
 		}
-		if (link && (link instanceof HTMLAnchorElement || link.getAttribute('data-href'))) {
-			this.handleTimecodeHref(link.getAttribute('data-href') ?? (link as HTMLAnchorElement).getAttribute?.('href') ?? '', link, dbg, e);
+		if (link) {
+			const href = this.getHrefFromTimecodeElement(link);
+			if (href) {
+				void this.handleTimecodeHref(href, link, dbg, e, wantsAudio, wantsTranscript);
+			}
 			return;
 		}
 
 		// 2) Clic dans l’éditeur (Live Preview / source) : récupérer le lien à la position du clic
 		if (inEditor) {
-			const fromEditor = this.handleTimecodeClickInEditor(e, dbg);
-			if (fromEditor) {
-				e.preventDefault();
-				e.stopPropagation();
-				e.stopImmediatePropagation();
-			}
+			void this.handleTimecodeClickInEditor(e, dbg, wantsAudio, wantsTranscript).then((fromEditor) => {
+				if (fromEditor) {
+					e.preventDefault();
+					e.stopPropagation();
+					e.stopImmediatePropagation();
+				}
+			});
 			return;
 		}
 
@@ -1312,40 +1533,115 @@ export default class RecordingIndicatorPlugin extends Plugin {
 		}
 	}
 
-	private handleTimecodeHref(href: string, link: HTMLElement, dbg: boolean, e: MouseEvent): void {
-		if (!href.includes('#t=')) {
-			if (dbg) console.log('[Universal Timestamp] Lien sans #t=', href);
+	private async handleTimecodeHref(
+		href: string,
+		link: HTMLElement,
+		dbg: boolean,
+		e: MouseEvent,
+		wantsAudio: boolean,
+		wantsTranscript: boolean
+	): Promise<void> {
+		const parsed = this.parseTimecodeHref(href);
+		if (!parsed) {
+			if (dbg) console.log('[Universal Timestamp] Lien timecode invalide', href);
 			return;
 		}
 
-		const sharpIndex = href.indexOf('#');
-		const pathRaw = sharpIndex >= 0 ? href.slice(0, sharpIndex).trim() : '';
-		const hash = sharpIndex >= 0 ? href.slice(sharpIndex + 1).trim() : '';
-		const tMatch = hash.match(/^t=(\d+)$/);
-		if (!pathRaw || !tMatch) {
-			if (dbg) console.log('[Universal Timestamp] Hash invalide', pathRaw, hash);
-			return;
-		}
-
-		const path = this.linkPathFromHref(pathRaw);
-		if (!path) {
-			if (dbg) console.log('[Universal Timestamp] Chemin vide après parse', pathRaw);
-			return;
-		}
-
-		const offsetSeconds = parseInt(tMatch[1], 10);
-		if (!Number.isFinite(offsetSeconds) || offsetSeconds < 0) {
-			return;
-		}
-
-		if (dbg) console.log('[Universal Timestamp] Lien timecode détecté', { path, pathRaw, offsetSeconds, href });
+		const { path, offsetSeconds } = parsed;
+		if (dbg) console.log('[Universal Timestamp] Lien timecode détecté', { path, offsetSeconds, href });
 
 		const view = this.getMarkdownViewContaining(link) ?? this.app.workspace.getActiveViewOfType(MarkdownView);
-		if (this.trySeekToTimecode(view, path, offsetSeconds, dbg)) {
+		if (!view?.file) {
+			return;
+		}
+
+		// Bloquer tout de suite la navigation Obsidian vers le fichier audio/JSON
+		if (wantsTranscript || wantsAudio) {
 			e.preventDefault();
 			e.stopPropagation();
 			e.stopImmediatePropagation();
 		}
+
+		let handled = false;
+		if (wantsAudio && this.trySeekToTimecode(view, path, offsetSeconds, dbg)) {
+			handled = true;
+		}
+		if (wantsTranscript) {
+			const ok = await this.openTranscriptAtOffset(view.file, offsetSeconds, dbg);
+			if (ok) {
+				handled = true;
+			}
+		}
+
+		if (dbg && !handled) {
+			console.log('[Universal Timestamp] Aucune action timecode exécutée', {
+				wantsAudio,
+				wantsTranscript
+			});
+		}
+	}
+
+	getHrefFromTimecodeElement(el: HTMLElement): string | null {
+		for (const attr of ['data-href', 'href']) {
+			const value = el.getAttribute(attr);
+			if (value && this.parseTimecodeHref(value)) {
+				return value;
+			}
+		}
+		return null;
+	}
+
+	private parseTimecodeHref(href: string): { path: string; offsetSeconds: number } | null {
+		let decoded = href;
+		try {
+			decoded = decodeURI(href);
+		} catch {
+			decoded = href;
+		}
+		const lower = decoded.toLowerCase();
+		if (!lower.includes('#t=')) {
+			return null;
+		}
+
+		const sharpIndex = decoded.indexOf('#');
+		const pathRaw = sharpIndex >= 0 ? decoded.slice(0, sharpIndex).trim() : '';
+		const hash = sharpIndex >= 0 ? decoded.slice(sharpIndex + 1).trim() : '';
+		const tMatch = hash.match(/^t=(\d+)$/i);
+		if (!pathRaw || !tMatch) {
+			return null;
+		}
+
+		const path = this.linkPathFromHref(pathRaw);
+		if (!path) {
+			return null;
+		}
+
+		const offsetSeconds = parseInt(tMatch[1], 10);
+		if (!Number.isFinite(offsetSeconds) || offsetSeconds < 0) {
+			return null;
+		}
+
+		return { path, offsetSeconds };
+	}
+
+	getEffectiveTimecodeClickMode(): TimecodeClickMode {
+		if (this.settings.timecodeClickMode === 'dual_buttons') {
+			return 'dual_buttons';
+		}
+		if (!this.settings.enableTranscriptLinking) {
+			return 'audio';
+		}
+		return this.settings.timecodeClickMode;
+	}
+
+	shouldSeekAudioOnTimecodeClick(): boolean {
+		const mode = this.getEffectiveTimecodeClickMode();
+		return this.settings.seekTimecodeInPagePlayer && (mode === 'audio' || mode === 'both');
+	}
+
+	shouldOpenTranscriptOnTimecodeClick(): boolean {
+		const mode = this.getEffectiveTimecodeClickMode();
+		return this.settings.enableTranscriptLinking && (mode === 'transcript' || mode === 'both');
 	}
 
 	/**
@@ -1383,7 +1679,12 @@ export default class RecordingIndicatorPlugin extends Plugin {
 	/**
 	 * Clic dans l’éditeur (Live Preview ou source) : trouve le lien [[...#t=...]] à la position du clic et lance le seek.
 	 */
-	private handleTimecodeClickInEditor(e: MouseEvent, dbg: boolean): boolean {
+	private async handleTimecodeClickInEditor(
+		e: MouseEvent,
+		dbg: boolean,
+		wantsAudio: boolean,
+		wantsTranscript: boolean
+	): Promise<boolean> {
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (!view?.file?.extension?.toLowerCase?.()?.endsWith?.('md') || !view.editor) {
 			return false;
@@ -1426,7 +1727,24 @@ export default class RecordingIndicatorPlugin extends Plugin {
 				const offsetSeconds = parseInt(match[2], 10);
 				if (!path || !Number.isFinite(offsetSeconds) || offsetSeconds < 0) continue;
 				if (dbg) console.log('[Universal Timestamp] Éditeur : lien timecode à la position', { path, offsetSeconds });
-				return this.trySeekToTimecode(view, path, offsetSeconds, dbg);
+
+				if (wantsTranscript || wantsAudio) {
+					e.preventDefault();
+					e.stopPropagation();
+					e.stopImmediatePropagation();
+				}
+
+				let handled = false;
+				if (wantsAudio && this.trySeekToTimecode(view, path, offsetSeconds, dbg)) {
+					handled = true;
+				}
+				if (wantsTranscript && view.file) {
+					const ok = await this.openTranscriptAtOffset(view.file, offsetSeconds, dbg);
+					if (ok) {
+						handled = true;
+					}
+				}
+				return handled;
 			}
 		}
 		if (dbg) console.log('[Universal Timestamp] Éditeur : pas de lien #t= à la position', offset);
@@ -1875,6 +2193,186 @@ export default class RecordingIndicatorPlugin extends Plugin {
 		} catch {
 			return null;
 		}
+	}
+
+	getTranscriptJsonFiles(): TFile[] {
+		return this.app.vault
+			.getFiles()
+			.filter((file) => file.extension.toLowerCase() === 'json')
+			.sort((a, b) => a.basename.localeCompare(b.basename));
+	}
+
+	findTranscriptForAudio(audio: TFile, candidates: TFile[]): TFile | null {
+		const audioBases = transcriptBasenamesForAudio(audio.basename);
+		return (
+			candidates.find((file) => {
+				const jsonBase = file.basename.replace(/\.json$/i, '');
+				return audioBases.includes(jsonBase);
+			}) ?? null
+		);
+	}
+
+	getLinkedTranscriptFile(note: TFile): TFile | null {
+		const metadata = this.app.metadataCache.getFileCache(note);
+
+		if (metadata?.frontmatter?.transcript_file) {
+			const transcriptLink = metadata.frontmatter.transcript_file;
+			if (typeof transcriptLink === 'string') {
+				const resolved = this.resolveFileFromLink(transcriptLink, note);
+				if (resolved && resolved.extension.toLowerCase() === 'json') {
+					return resolved;
+				}
+			}
+		}
+
+		const audio = this.getLinkedAudioFile(note);
+		if (audio) {
+			return this.findTranscriptForAudio(audio, this.getTranscriptJsonFiles());
+		}
+
+		return null;
+	}
+
+	private getOrCreateTranscriptLeaf(): WorkspaceLeaf {
+		const existing = this.app.workspace.getLeavesOfType(TRANSCRIPT_VIEW_TYPE);
+		if (existing.length > 0) {
+			return existing[0];
+		}
+		return this.app.workspace.getLeaf('split');
+	}
+
+	async openTranscriptAtOffset(note: TFile, offsetSeconds: number, dbg = false): Promise<boolean> {
+		const transcript = this.getLinkedTranscriptFile(note);
+		if (!transcript) {
+			if (this.settings.showNotifications) {
+				new Notice('Aucune transcription liée à cette note.');
+			}
+			if (dbg) {
+				console.log('[Universal Timestamp] Pas de transcript_file');
+			}
+			return false;
+		}
+
+		const leaf = this.getOrCreateTranscriptLeaf();
+		if (!(leaf.view instanceof TranscriptView)) {
+			await leaf.setViewState({ type: TRANSCRIPT_VIEW_TYPE, active: true });
+		}
+		this.app.workspace.revealLeaf(leaf);
+
+		const view = leaf.view instanceof TranscriptView ? leaf.view : null;
+		if (!view) {
+			if (dbg) {
+				console.log('[Universal Timestamp] TranscriptView introuvable');
+			}
+			return false;
+		}
+
+		const ok = await view.openTranscript(transcript, offsetSeconds);
+		if (!ok) {
+			if (this.settings.showNotifications) {
+				new Notice('Fichier de transcription invalide (format Vibe attendu).');
+			}
+			if (dbg) {
+				console.log('[Universal Timestamp] Parse transcription échoué', transcript.path);
+			}
+		}
+		return ok;
+	}
+
+	shouldShowTimecodeActionButtons(note: TFile): boolean {
+		if (!this.settings.enableTranscriptLinking) {
+			return false;
+		}
+		if (this.getEffectiveTimecodeClickMode() !== 'dual_buttons') {
+			return false;
+		}
+		return !!this.getLinkedAudioFile(note) || !!this.getLinkedTranscriptFile(note);
+	}
+
+	appendTimecodeActionButtons(
+		container: HTMLElement,
+		noteFile: TFile,
+		parsed: { path: string; offsetSeconds: number },
+		anchor?: HTMLElement
+	): void {
+		const hasAudio = !!this.getLinkedAudioFile(noteFile);
+		const hasTranscript = !!this.getLinkedTranscriptFile(noteFile);
+
+		const actions = container.createEl('span', { cls: 'ut-timecode-actions' });
+
+		if (hasAudio) {
+			const playBtn = actions.createEl('button', {
+				cls: 'ut-timecode-action ut-timecode-action-audio',
+				attr: { type: 'button', title: 'Lecture audio' }
+			});
+			setIcon(playBtn, 'play');
+			playBtn.addEventListener('mousedown', (ev) => {
+				ev.preventDefault();
+				ev.stopPropagation();
+			});
+			playBtn.addEventListener('click', (ev) => {
+				ev.preventDefault();
+				ev.stopPropagation();
+				const view =
+					(anchor ? this.getMarkdownViewContaining(anchor) : null) ??
+					this.app.workspace.getActiveViewOfType(MarkdownView);
+				this.trySeekToTimecode(view, parsed.path, parsed.offsetSeconds, false);
+			});
+		}
+
+		if (hasTranscript) {
+			const transcriptBtn = actions.createEl('button', {
+				cls: 'ut-timecode-action ut-timecode-action-transcript',
+				attr: { type: 'button', title: 'Ouvrir transcription' }
+			});
+			setIcon(transcriptBtn, 'file-text');
+			transcriptBtn.addEventListener('mousedown', (ev) => {
+				ev.preventDefault();
+				ev.stopPropagation();
+			});
+			transcriptBtn.addEventListener('click', (ev) => {
+				ev.preventDefault();
+				ev.stopPropagation();
+				void this.openTranscriptAtOffset(noteFile, parsed.offsetSeconds);
+			});
+		}
+	}
+
+	private processTimecodeLinkActions(
+		element: HTMLElement,
+		context: MarkdownPostProcessorContext
+	): void {
+		const noteFile = context.sourcePath
+			? this.app.vault.getAbstractFileByPath(context.sourcePath)
+			: null;
+		if (!(noteFile instanceof TFile) || !this.shouldShowTimecodeActionButtons(noteFile)) {
+			return;
+		}
+
+		const links = element.querySelectorAll<HTMLElement>('a.internal-link, a[href]');
+
+		links.forEach((linkEl) => {
+			if (linkEl.closest('.ut-timecode-wrap')) {
+				return;
+			}
+
+			const href = this.getHrefFromTimecodeElement(linkEl);
+			if (!href) {
+				return;
+			}
+
+			const parsed = this.parseTimecodeHref(href);
+			if (!parsed) {
+				return;
+			}
+
+			const wrap = document.createElement('span');
+			wrap.addClass('ut-timecode-wrap');
+			linkEl.parentNode?.insertBefore(wrap, linkEl);
+			wrap.appendChild(linkEl);
+
+			this.appendTimecodeActionButtons(wrap, noteFile, parsed, linkEl);
+		});
 	}
 
 	private getLinkedAudioFile(note: TFile): TFile | null {
