@@ -1,6 +1,6 @@
 {
   "name": "universal-timestamp",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Plugin pour insérer des horodatages universels et les associer à des enregistrements externes",
   "main": "main.js",
   "scripts": {
