@@ -3,9 +3,9 @@
 	"name": "Universal Timestamp",
 	"version": "1.0.3",
 	"minAppVersion": "0.15.0",
-	"description": "Insérez des horodatages universels et associez-les à vos enregistrements externes dans Obsidian",
-	"author": "Assistant",
-	"authorUrl": "",
+	"description": "Insérez des horodatages universels et associez-les à vos enregistrements externes.",
+	"author": "l'Atelier",
+	"authorUrl": "https://atelier.atechnologie.fr/activites/programmation-doutils/",
 	"fundingUrl": "",
 	"isDesktopOnly": false
 }

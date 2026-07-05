@@ -15,7 +15,7 @@ Un plugin Obsidian pour prendre des notes pendant une session enregistrée (audi
 ### Installation manuelle
 
 1. Téléchargez les fichiers `main.js`, `manifest.json` et `styles.css`
-2. Créez un dossier `recording-indicator` dans votre dossier `.obsidian/plugins/`
+2. Créez un dossier `universal-timestamp` dans votre dossier `.obsidian/plugins/`
 3. Placez les fichiers téléchargés dans ce dossier
 4. Redémarrez Obsidian
 5. Activez le plugin dans les paramètres
@@ -23,8 +23,10 @@ Un plugin Obsidian pour prendre des notes pendant une session enregistrée (audi
 ### Installation via BRAT (recommandée)
 
 1. Installez le plugin [BRAT](https://github.com/TfTHacker/obsidian42-brat)
-2. Ajoutez ce repository : `https://github.com/votre-username/recording-indicator`
+2. Ajoutez ce dépôt : `https://github.com/Morglaf/Universal-Timestamp`
 3. Activez le plugin dans les paramètres
+
+> **ID plugin (catalogue Obsidian)** : `universal-timestamp` — le dossier dans `.obsidian/plugins/` doit s’appeler **`universal-timestamp`**.
 
 ## 🚀 Utilisation
 
@@ -106,12 +108,17 @@ Inspiré par le plugin [Media Extended](https://github.com/aidenlx/media-extende
 
 ## 🐛 Signaler un bug
 
-Si vous rencontrez un problème, veuillez ouvrir une [issue](https://github.com/votre-username/recording-indicator/issues) avec :
+Si vous rencontrez un problème, ouvrez une [issue](https://github.com/Morglaf/Universal-Timestamp/issues).
 
-- Version d'Obsidian
-- Plateforme (Windows/Android/iOS)
-- Description détaillée du problème
-- Étapes pour reproduire
+## Conformité catalogue Obsidian
+
+| Élément | Détail |
+| --- | --- |
+| **Licence** | MIT — [LICENSE](LICENSE) |
+| **Réseau** | non — horodatages locaux, fichiers audio dans le coffre uniquement |
+| **Fichiers hors vault** | non |
+| **Télémétrie / mise à jour auto** | non |
+| **Release** | `.\Release-Plugin.ps1` |
 
 ## 📱 Compatibilité
 
