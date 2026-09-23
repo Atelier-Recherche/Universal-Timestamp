@@ -132,4 +132,4 @@ Si vous rencontrez un problème, ouvrez une [issue](https://github.com/Morglaf/U
 
 ---
 
-**Note** : le plugin n’enregistre pas l’audio. Il se concentre sur la prise de notes et la synchronisation temporelle avec un enregistrement externe.
+**Note** : le plugin n’enregistre pas l’audio. Il se concentre sur la prise de notes et la synchronisation temporelle avec un enregistrement externe. Sur Android, [android-audio-recorder](https://gitlab.com/axet/android-audio-recorder) fait très bien le job pour l’enregistrement.
