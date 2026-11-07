@@ -1,56 +1,84 @@
-# Universal Timestamp - Plugin Obsidian
 
-Un plugin Obsidian pour prendre des notes pendant une session enregistrée (audio ou vidéo) en générant des **horodatages universels** basés sur l’horloge système. Une fois l’enregistrement importé, les horodatages sont convertis en liens `#t=` cliquables.
+
+|                                                                                                      |                                                                                                                                             |
+| ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| ![Universal Timestamp](https://atelier.atechnologie.fr/wp-content/uploads/2026/04/Sans-titre-1.webp) | Universal Timestamp**Horodatages universels · notes pendant enregistrement · liens #t=** plugin Obsidian · audio / vidéo · horloge système |
+
+![l'Atelier](https://atelier.atechnologie.fr/wp-content/uploads/2026/11/logoasso.webp)  
+Développé par [l'Atelier](https://atelier.atechnologie.fr/) — fabrication de livres et outils de recherche (EHESS)
+
+🇫🇷 **[Français](README.md)** · 🇬🇧 [English](README.en.md) · 🇩🇪 [Deutsch](README.de.md) · 🇪🇸 [Español](README.es.md)
+
+![Site l'Atelier](https://img.shields.io/badge/🌐_l'Atelier-atelier.atechnologie.fr-2d5016?style=for-the-badge)![Dépôt GitHub](https://img.shields.io/badge/📦_Dépôt-GitHub-181717?style=for-the-badge&logo=github)![Installer via BRAT](https://img.shields.io/badge/⬇️_Installer-BRAT-7c3aed?style=for-the-badge&logo=obsidian&logoColor=white)
+
+
+
+---
+
+## 📸 Aperçu
+
+|                                                                  |                                                      |
+| :--------------------------------------------------------------: | :--------------------------------------------------: |
+| ![Insertion d'un horodatage universel](readme-media/screen1.jpg) | ![Conversion en liens #t=](readme-media/screen2.jpg) |
+
+---
+
+## 📖 À propos
+
+Plugin Obsidian pour prendre des notes pendant une session enregistrée (audio ou vidéo) en générant des **horodatages universels** basés sur l’horloge système. Une fois l’enregistrement importé, les horodatages sont convertis en liens `#t=` cliquables.
+
+> **Note** : le plugin n’enregistre pas l’audio. Il se concentre sur la prise de notes et la synchronisation temporelle avec un enregistrement externe. Sur Android, [android-audio-recorder](https://gitlab.com/axet/android-audio-recorder) convient bien pour l’enregistrement.
 
 ## 🌟 Fonctionnalités
 
 - **📝 Horodatages universels** : `Ctrl+Shift+T` insère un marqueur horodaté (`%%REC{...}%%`) accompagné d’un libellé lisible.
-- **🔗 Conversion contrôlée** : commande “Associer un fichier audio aux horodatages” pour transformer les marqueurs en liens `[[fichier#t=123|[02:03]]]`.
+- **🔗 Conversion contrôlée** : commande « Associer un fichier audio aux horodatages » pour transformer les marqueurs en liens `[[fichier#t=123|[02:03]]]`.
 - **🔔 Proposition contextuelle** : lorsqu’un lien vers un fichier audio est inséré dans la note, le plugin peut proposer immédiatement de lancer la conversion (aucune action forcée).
 - **📂 Reconnaissance des fichiers** : détection automatique des fichiers audio (MP3, WAV, M4A, OGG, WebM, MP4, AAC, FLAC) déjà présents dans le coffre.
 - **⚙️ Paramètres épurés** : format du libellé `{time}`, affichage ou non des secondes, notifications.
 
-## 📦 Installation
+## ⬇️ Installation via BRAT (1 clic)
+
+> **ID du plugin (catalogue Obsidian)** : `universal-timestamp` — le dossier dans `.obsidian/plugins/` doit s’appeler `universal-timestamp`.
+
+1. 🔌 Installer **BRAT** : [Obsidian — BRAT](https://obsidian.md/plugins?search=BRAT#)
+2. ➕ Ajouter ce dépôt avec l’option *« Add Beta plugin »* :
+
+   `https://github.com/Atelier-Recherche/Universal-Timestamp`
+
+> 💡 Nos plugins peuvent être en attente de validation sur le catalogue Obsidian ; BRAT permet de les tester dès maintenant. Voir aussi 🌐 [l’Atelier](https://atelier.atechnologie.fr/).
 
 ### Installation manuelle
 
 1. Téléchargez les fichiers `main.js`, `manifest.json` et `styles.css`
-2. Créez un dossier `universal-timestamp` dans votre dossier `.obsidian/plugins/`
+2. Créez un dossier `universal-timestamp` dans `.obsidian/plugins/`
 3. Placez les fichiers téléchargés dans ce dossier
 4. Redémarrez Obsidian
 5. Activez le plugin dans les paramètres
-
-### Installation via BRAT (recommandée)
-
-1. Installez le plugin [BRAT](https://github.com/TfTHacker/obsidian42-brat)
-2. Ajoutez ce dépôt : `https://github.com/Morglaf/Universal-Timestamp`
-3. Activez le plugin dans les paramètres
-
-> **ID plugin (catalogue Obsidian)** : `universal-timestamp` — le dossier dans `.obsidian/plugins/` doit s’appeler **`universal-timestamp`**.
 
 ## 🚀 Utilisation
 
 ### 1. Pendant la prise de notes
 
-- À chaque repère temporel souhaité, utilisez la commande **“Insérer un horodatage universel”** (`Ctrl+Shift+T` par défaut).
+- À chaque repère temporel souhaité, utilisez la commande **« Insérer un horodatage universel »** (`Ctrl+Shift+T` par défaut).
 - Un placeholder du type `%%REC{"time":"2025-11-08T16:32:23.123Z"}%%[16:32:23]` est inséré à l’emplacement du curseur.
 
 ### 2. Après l’enregistrement
 
-- Copiez ou importez le fichier audio/vidéo (depuis un téléphone, un enregistreur externe, etc.) dans votre coffre Obsidian.
+- Copiez ou importez le fichier audio/vidéo dans votre coffre Obsidian.
 - Si le fichier possède un nom incluant la date/heure de démarrage (`2025-11-07 16.32.23.m4a`, par exemple), le plugin pré-remplira automatiquement l’heure de début.
 
 ### 3. Conversion des horodatages
 
 - Ouvrez la note contenant vos placeholders.
-- Lancez la commande **“Associer un fichier audio aux horodatages”**.
-  - Choisissez le fichier audio à lier (le champ est automatiquement renseigné avec la note ouverte).
+- Lancez la commande **« Associer un fichier audio aux horodatages »**.
+  - Choisissez le fichier audio à lier.
   - Ajustez l’heure de démarrage si nécessaire (format `YYYY-MM-DD HH:mm:ss`).
 - Tous les placeholders référencés sont remplacés par des liens `#t=` cliquables.
 
 ### Suggestions contextuelles
 
-- Si vous ajoutez un lien `[[...]]` vers un fichier audio reconnu, une fenêtre vous propose de lancer immédiatement la conversion (vous pouvez refuser et le faire plus tard).
+Si vous ajoutez un lien `[[...]]` vers un fichier audio reconnu, une fenêtre vous propose de lancer immédiatement la conversion (vous pouvez refuser et le faire plus tard).
 
 ## ⚙️ Paramètres
 
@@ -70,55 +98,11 @@ Un plugin Obsidian pour prendre des notes pendant une session enregistrée (audi
 - Node.js 16+
 - npm ou yarn
 
-### Installation des dépendances
-
 ```bash
 npm install
-```
-
-### Développement
-
-```bash
 npm run dev
-```
-
-### Build de production
-
-```bash
 npm run build
 ```
-
-## 🤝 Contribution
-
-Les contributions sont les bienvenues ! N'hésitez pas à :
-
-1. Fork le projet
-2. Créer une branche pour votre fonctionnalité
-3. Commiter vos changements
-4. Pousser vers la branche
-5. Ouvrir une Pull Request
-
-## 📝 Licence
-
-Ce projet est sous licence MIT. Voir le fichier [LICENSE](LICENSE) pour plus de détails.
-
-## 🙏 Remerciements
-
-Inspiré par le plugin [Media Extended](https://github.com/aidenlx/media-extended) mais avec un focus sur l'indicateur d'enregistrement et la compatibilité mobile.
-
-## 🐛 Signaler un bug
-
-Si vous rencontrez un problème, ouvrez une [issue](https://github.com/Morglaf/Universal-Timestamp/issues).
-
-## Conformité catalogue Obsidian
-
-| Élément | Détail |
-| --- | --- |
-| **Licence** | MIT — [LICENSE](LICENSE) |
-| **Réseau** | non — horodatages locaux, fichiers audio dans le coffre uniquement |
-| **Fichiers hors vault** | non |
-| **Télémétrie / mise à jour auto** | non |
-| **Release** | `.\Release-Plugin.ps1` |
 
 ## 📱 Compatibilité
 
@@ -130,6 +114,29 @@ Si vous rencontrez un problème, ouvrez une [issue](https://github.com/Morglaf/U
 | Android | ✅ Supporté |
 | iOS | ✅ Supporté |
 
+## Conformité catalogue Obsidian
+
+| Élément | Détail |
+| --- | --- |
+| **Licence** | MIT — [LICENSE](LICENSE) |
+| **Réseau** | non — horodatages locaux, fichiers audio dans le coffre uniquement |
+| **Fichiers hors vault** | non |
+| **Télémétrie / mise à jour auto** | non |
+| **Release** | `.\Release-Plugin.ps1` |
+
+## 🙏 Remerciements
+
+Inspiré par le plugin [Media Extended](https://github.com/aidenlx/media-extended), avec un focus sur l’indicateur d’enregistrement et la compatibilité mobile.
+
+## 🔗 Ressources
+
+| | |
+| --- | --- |
+| 🌐 **l'Atelier** | [atelier.atechnologie.fr](https://atelier.atechnologie.fr/) |
+| 📦 **Dépôt** | [github.com/Atelier-Recherche/Universal-Timestamp](https://github.com/Atelier-Recherche/Universal-Timestamp) |
+
 ---
 
-**Note** : le plugin n’enregistre pas l’audio. Il se concentre sur la prise de notes et la synchronisation temporelle avec un enregistrement externe. Sur Android, [android-audio-recorder](https://gitlab.com/axet/android-audio-recorder) fait très bien le job pour l’enregistrement.
+
+
+**🇫🇷 Français** · [🇬🇧 English](README.en.md) · [🇩🇪 Deutsch](README.de.md) · [🇪🇸 Español](README.es.md)
