@@ -1,25 +1,39 @@
+<div align="center">
 
+<table>
+<tr>
+<td><img src="https://atelier.atechnologie.fr/wp-content/uploads/2026/04/Sans-titre-1.webp" alt="Universal Timestamp" width="140" /></td>
+<td align="left">
+<h1 style="margin:0">Universal Timestamp</h1>
+<p style="margin:0.25em 0 0"><strong>Horodatages universels · notes pendant enregistrement · liens #t=</strong><br/>plugin Obsidian · audio / vidéo · horloge système</p>
+</td>
+</tr>
+</table>
 
-|                                                                                                      |                                                                                                                                             |
-| ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| ![Universal Timestamp](https://atelier.atechnologie.fr/wp-content/uploads/2026/04/Sans-titre-1.webp) | Universal Timestamp**Horodatages universels · notes pendant enregistrement · liens #t=** plugin Obsidian · audio / vidéo · horloge système |
+<a href="https://atelier.atechnologie.fr/" title="l'Atelier – Association de fabrication de livres et d'outils de recherche"><img src="https://atelier.atechnologie.fr/wp-content/uploads/2026/11/logoasso.webp" alt="l'Atelier" width="200" /></a>  
+<sub>Développé par <a href="https://atelier.atechnologie.fr/">l'Atelier</a> — fabrication de livres et outils de recherche (EHESS)</sub>
 
-![l'Atelier](https://atelier.atechnologie.fr/wp-content/uploads/2026/11/logoasso.webp)  
-Développé par [l'Atelier](https://atelier.atechnologie.fr/) — fabrication de livres et outils de recherche (EHESS)
+<p>
+🇫🇷 <a href="README.md"><b>Français</b></a> ·
+🇬🇧 <a href="README.en.md">English</a> ·
+🇩🇪 <a href="README.de.md">Deutsch</a> ·
+🇪🇸 <a href="README.es.md">Español</a>
+</p>
 
-🇫🇷 **[Français](README.md)** · 🇬🇧 [English](README.en.md) · 🇩🇪 [Deutsch](README.de.md) · 🇪🇸 [Español](README.es.md)
+<p>
+<a href="https://atelier.atechnologie.fr/"><img src="https://img.shields.io/badge/🌐_l'Atelier-atelier.atechnologie.fr-2d5016?style=for-the-badge" alt="Site l'Atelier" /></a>
+<a href="https://github.com/Atelier-Recherche/Universal-Timestamp"><img src="https://img.shields.io/badge/📦_Dépôt-GitHub-181717?style=for-the-badge&logo=github" alt="Dépôt GitHub" /></a>
+<a href="https://obsidian.md/plugins?search=BRAT#"><img src="https://img.shields.io/badge/⬇️_Installer-BRAT-7c3aed?style=for-the-badge&logo=obsidian&logoColor=white" alt="Installer via BRAT" /></a>
+</p>
 
-![Site l'Atelier](https://img.shields.io/badge/🌐_l'Atelier-atelier.atechnologie.fr-2d5016?style=for-the-badge)![Dépôt GitHub](https://img.shields.io/badge/📦_Dépôt-GitHub-181717?style=for-the-badge&logo=github)![Installer via BRAT](https://img.shields.io/badge/⬇️_Installer-BRAT-7c3aed?style=for-the-badge&logo=obsidian&logoColor=white)
-
-
+</div>
 
 ---
 
 ## 📸 Aperçu
 
-|                                                                  |                                                      |
-| :--------------------------------------------------------------: | :--------------------------------------------------: |
-| ![Insertion d'un horodatage universel](readme-media/screen1.jpg) | ![Conversion en liens #t=](readme-media/screen2.jpg) |
+| :---: | :---: |
+| <img src="readme-media/screen1.jpg" alt="Insertion d'un horodatage universel" width="400" /> | <img src="readme-media/screen2.jpg" alt="Conversion en liens #t=" width="400" /> |
 
 ---
 
@@ -39,11 +53,10 @@ Plugin Obsidian pour prendre des notes pendant une session enregistrée (audio o
 
 ## ⬇️ Installation via BRAT (1 clic)
 
-> **ID du plugin (catalogue Obsidian)** : `universal-timestamp` — le dossier dans `.obsidian/plugins/` doit s’appeler `universal-timestamp`.
+> **ID du plugin (catalogue Obsidian)** : `universal-timestamp` — le dossier dans `.obsidian/plugins/` doit s’appeler **`universal-timestamp`**.
 
 1. 🔌 Installer **BRAT** : [Obsidian — BRAT](https://obsidian.md/plugins?search=BRAT#)
-2. ➕ Ajouter ce dépôt avec l’option *« Add Beta plugin »* :
-
+2. ➕ Ajouter ce dépôt avec l’option *« Add Beta plugin »* :  
    `https://github.com/Atelier-Recherche/Universal-Timestamp`
 
 > 💡 Nos plugins peuvent être en attente de validation sur le catalogue Obsidian ; BRAT permet de les tester dès maintenant. Voir aussi 🌐 [l’Atelier](https://atelier.atechnologie.fr/).
@@ -137,6 +150,8 @@ Inspiré par le plugin [Media Extended](https://github.com/aidenlx/media-extende
 
 ---
 
+<div align="center">
 
+<sub><b>🇫🇷 Français</b> · <a href="README.en.md">🇬🇧 English</a> · <a href="README.de.md">🇩🇪 Deutsch</a> · <a href="README.es.md">🇪🇸 Español</a></sub>
 
-**🇫🇷 Français** · [🇬🇧 English](README.en.md) · [🇩🇪 Deutsch](README.de.md) · [🇪🇸 Español](README.es.md)
+</div>

@@ -32,7 +32,6 @@
 
 ## 📸 Overview
 
-| Insertion | Conversion |
 | :---: | :---: |
 | <img src="readme-media/screen1.jpg" alt="Inserting a universal timestamp" width="400" /> | <img src="readme-media/screen2.jpg" alt="Converting to #t= links" width="400" /> |
 

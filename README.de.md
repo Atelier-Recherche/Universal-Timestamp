@@ -32,7 +32,6 @@
 
 ## 📸 Übersicht
 
-| Einfügen | Umwandlung |
 | :---: | :---: |
 | <img src="readme-media/screen1.jpg" alt="Einfügen eines universellen Zeitstempels" width="400" /> | <img src="readme-media/screen2.jpg" alt="Umwandlung in #t=-Links" width="400" /> |
 
