@@ -32,8 +32,7 @@
 
 ## 📸 Aperçu
 
-| :---: | :---: |
-| <img src="readme-media/screen1.jpg" alt="Insertion d'un horodatage universel" width="400" /> | <img src="readme-media/screen2.jpg" alt="Conversion en liens #t=" width="400" /> |
+<img src="readme-media/screen1.jpg" alt="Insertion d'un horodatage universel" width="400" /> <img src="readme-media/screen2.jpg" alt="Conversion en liens #t=" width="400" />
 
 ---
 

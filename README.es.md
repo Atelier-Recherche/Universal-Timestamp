@@ -32,8 +32,7 @@
 
 ## 📸 Vista previa
 
-| :---: | :---: |
-| <img src="readme-media/screen1.jpg" alt="Inserción de una marca temporal universal" width="400" /> | <img src="readme-media/screen2.jpg" alt="Conversión a enlaces #t=" width="400" /> |
+<img src="readme-media/screen1.jpg" alt="Insertion d'un horodatage universel" width="400" /> <img src="readme-media/screen2.jpg" alt="Conversion en liens #t=" width="400" />
 
 ---
 
